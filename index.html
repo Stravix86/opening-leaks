@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening Leak Finder</title>
+<meta name="description" content="Find the opening lines that cost you the most points on Lichess, measured against your opponents' ratings.">
+<meta name="theme-color" content="#2e7d32">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<link rel="modulepreload" href="vendor/chess.js">
+<script>try{const t=localStorage.getItem('olf.theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./">
+    <img src="icons/icon.svg" alt="" width="26" height="26">
+    <span>Opening Leak Finder</span>
+  </a>
+  <div class="top-actions">
+    <a class="btn ghost small-btn" href="https://github.com/Stravix86/opening-leaks" target="_blank" rel="noopener">Source</a>
+    <button class="btn ghost icon-btn" id="themeBtn" type="button" aria-label="Switch light or dark theme" title="Theme">
+      <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+  <section class="intro" id="intro">
+    <h1>Find the openings that cost you rating</h1>
+    <p class="lead">Enter a Lichess username. Your recent games are downloaded from Lichess and checked move by move through the opening, to find the exact lines where you score worse than your opponents' ratings predict.</p>
+  </section>
+
+  <form class="card query" id="form" autocomplete="off">
+    <div class="field user-field">
+      <label for="user">Lichess username</label>
+      <input id="user" name="user" required minlength="2" maxlength="30" pattern="[A-Za-z0-9_\-]+" spellcheck="false" autocapitalize="off" placeholder="e.g. Stravik">
+    </div>
+    <div class="field">
+      <label for="max">Games</label>
+      <select id="max" name="max">
+        <option value="200">Last 200</option>
+        <option value="500" selected>Last 500</option>
+        <option value="1000">Last 1,000</option>
+        <option value="2000">Last 2,000</option>
+        <option value="5000">Last 5,000</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="depth">Look at</label>
+      <select id="depth" name="depth">
+        <option value="16">First 8 moves</option>
+        <option value="24" selected>First 12 moves</option>
+        <option value="32">First 16 moves</option>
+      </select>
+    </div>
+    <fieldset class="field speeds">
+      <legend>Time controls</legend>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" name="speed" value="bullet" checked><span>Bullet</span></label>
+        <label class="chip"><input type="checkbox" name="speed" value="blitz" checked><span>Blitz</span></label>
+        <label class="chip"><input type="checkbox" name="speed" value="rapid" checked><span>Rapid</span></label>
+        <label class="chip"><input type="checkbox" name="speed" value="classical" checked><span>Classical</span></label>
+        <label class="chip"><input type="checkbox" name="speed" value="correspondence"><span>Correspondence</span></label>
+      </div>
+    </fieldset>
+    <label class="check"><input type="checkbox" id="rated" checked> Rated games only</label>
+    <button class="btn primary go" id="goBtn" type="submit">Analyze</button>
+  </form>
+
+  <section class="card status" id="status" hidden aria-live="polite">
+    <div class="status-row">
+      <span id="statusText">Connecting to Lichess…</span>
+      <button class="btn small-btn" id="cancelBtn" type="button">Stop and analyze</button>
+    </div>
+    <div class="progress"><div id="progressBar"></div></div>
+  </section>
+
+  <p class="error" id="error" hidden role="alert"></p>
+
+  <section id="results" hidden>
+    <div class="summary" id="summary"></div>
+
+    <nav class="tabs" id="tabs" role="tablist">
+      <button role="tab" data-tab="leaks" aria-selected="true">Leaks</button>
+      <button role="tab" data-tab="openings" aria-selected="false">Openings</button>
+      <button role="tab" data-tab="explorer" aria-selected="false">Explorer</button>
+    </nav>
+
+    <div class="panel" id="panel-leaks">
+      <div class="panel-head">
+        <p class="muted small" id="leaksNote"></p>
+        <div class="controls">
+          <div class="seg" id="leakColor">
+            <button data-v="both" aria-pressed="true">Both</button>
+            <button data-v="white" aria-pressed="false">White</button>
+            <button data-v="black" aria-pressed="false">Black</button>
+          </div>
+          <label class="inline">Min. games
+            <select id="minGames">
+              <option value="auto" selected>Auto</option>
+              <option value="3">3</option><option value="5">5</option><option value="10">10</option><option value="20">20</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div id="leakList" class="leak-list"></div>
+    </div>
+
+    <div class="panel" id="panel-openings" hidden>
+      <div class="panel-head">
+        <p class="muted small">Worst first: net points compares your results with what the ratings predicted. Click a column to sort.</p>
+        <div class="controls">
+          <div class="seg" id="opColor">
+            <button data-v="white" aria-pressed="true">White</button>
+            <button data-v="black" aria-pressed="false">Black</button>
+          </div>
+          <div class="seg" id="opLevel">
+            <button data-v="family" aria-pressed="true">Openings</button>
+            <button data-v="full" aria-pressed="false">Variations</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="stats" id="opTable"></table></div>
+    </div>
+
+    <div class="panel" id="panel-explorer" hidden>
+      <div class="panel-head">
+        <p class="muted small">Step through your own repertoire. Each move shows how you did in the games that went that way.</p>
+        <div class="controls">
+          <div class="seg" id="exColor">
+            <button data-v="white" aria-pressed="true">White</button>
+            <button data-v="black" aria-pressed="false">Black</button>
+          </div>
+        </div>
+      </div>
+      <div class="explorer">
+        <div class="ex-board">
+          <div id="exBoard"></div>
+          <div class="ex-nav">
+            <button class="btn" id="exStart" type="button">Start</button>
+            <button class="btn" id="exBack" type="button">Back</button>
+            <a class="btn ghost" id="exLink" target="_blank" rel="noopener">Open on Lichess</a>
+          </div>
+        </div>
+        <div class="ex-side">
+          <h3 id="exName"></h3>
+          <p class="line" id="exPath"></p>
+          <div class="table-wrap"><table class="stats" id="exTable"></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Games are downloaded straight from the public Lichess API into this page and analysed in your browser. Nothing is sent anywhere else or stored. Engine evaluations come from the Lichess cloud evaluation database when a position is in it. Not affiliated with Lichess.</p>
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
